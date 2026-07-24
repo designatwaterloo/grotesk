@@ -308,3 +308,13 @@ sub bracketleft.case @All @All @All @All @All @All bracketright' by bracketright
 
 # END case
 # -------------------------------------------------------------------------------------
+# BEGIN waterloo goop
+
+# The font recognizes its own name: the "oo" in "Waterloo"/"waterloo"
+# melts into the infinity pair. Scoped to the full word so book/good/loop
+# are never touched. Opt out per-run with calt off; opt in for any "oo"
+# via dlig (see dlig.fea).
+sub [W w] a t e r l o' o' by o_o.dlig;
+
+# END waterloo goop
+# -------------------------------------------------------------------------------------

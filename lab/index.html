@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waterloo Grotesk Lab</title>
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --fg: #f2f2f2;
+    --dim: #888;
+    --line: #2a2a2a;
+    --accent: #f2f2f2;
+    --panel: #161616;
+  }
+  .light {
+    --bg: #ffffff;
+    --fg: #0d0d0d;
+    --dim: #999;
+    --line: #e4e4e4;
+    --panel: #f5f5f5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 13px/1.5 "Waterloo Grotesk", sans-serif;
+    display: flex;
+    transition: background .15s, color .15s;
+  }
+  #sidebar {
+    width: 280px;
+    min-width: 280px;
+    border-right: 1px solid var(--line);
+    padding: 20px 18px 40px;
+    overflow-y: auto;
+    height: 100vh;
+    position: sticky; top: 0;
+  }
+  #sidebar h1 {
+    font-size: 15px; font-weight: 700; letter-spacing: -0.01em;
+    margin-bottom: 2px;
+  }
+  #sidebar .sub { color: var(--dim); margin-bottom: 20px; font-size: 11.5px; }
+  .group { margin-bottom: 20px; }
+  .group > label.head {
+    display: block; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--dim); margin-bottom: 7px;
+  }
+  .seg { display: flex; flex-wrap: wrap; gap: 4px; }
+  .seg button {
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    font: inherit; font-size: 12px; padding: 4px 9px; cursor: pointer;
+  }
+  .seg button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .slider-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .slider-row label { width: 74px; font-size: 11.5px; color: var(--dim); }
+  .slider-row input[type=range] { flex: 1; accent-color: var(--fg); }
+  .slider-row output { width: 46px; text-align: right; font-variant-numeric: tabular-nums; font-size: 11.5px; }
+  .checks label {
+    display: flex; gap: 7px; align-items: center;
+    font-size: 12.5px; padding: 2.5px 0; cursor: pointer;
+  }
+  .checks label input { accent-color: var(--fg); }
+  .checks .hint { color: var(--dim); font-size: 10.5px; margin-left: auto; }
+  #samples { display: flex; flex-wrap: wrap; gap: 4px; }
+  #samples button {
+    background: none; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer;
+  }
+  #samples button:hover { color: var(--fg); border-color: var(--fg); }
+  #main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #topbar {
+    display: flex; gap: 8px; align-items: center;
+    padding: 12px 20px; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: var(--bg); z-index: 5;
+  }
+  #topbar .mode { display: flex; gap: 4px; }
+  #topbar .spacer { flex: 1; }
+  #stage { flex: 1; padding: 34px 40px 120px; overflow-x: hidden; }
+  #preview {
+    outline: none; white-space: pre-wrap; word-break: break-word;
+    caret-color: var(--fg);
+  }
+  .waterfall-row { margin-bottom: 0.15em; }
+  .waterfall-tag {
+    font: 10px/1 "Waterloo Grotesk"; letter-spacing: 0.08em;
+    color: var(--dim); display: block; margin: 14px 0 4px;
+    text-transform: uppercase;
+  }
+  /* glyph grid */
+  #gridbar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+  #gridbar input[type=search] {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; font: inherit; padding: 5px 10px; width: 230px;
+  }
+  #gridstats { color: var(--dim); font-size: 11.5px; }
+  #glyphgrid {
+    display: grid; gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(var(--cell, 72px), 1fr));
+  }
+  .gcell {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 4px 4px; text-align: center; cursor: pointer; overflow: hidden;
+  }
+  .gcell:hover { border-color: var(--fg); }
+  .gcell svg { width: 100%; height: calc(var(--cell, 72px) * 0.72); }
+  .gcell svg path { fill: var(--fg); }
+  .gcell .gname {
+    font-size: 9px; color: var(--dim); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; margin-top: 2px;
+  }
+  #gmodal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.65);
+    display: none; align-items: center; justify-content: center; z-index: 50;
+  }
+  #gmodal.open { display: flex; }
+  #gmodal .card {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+    padding: 28px; width: min(560px, 92vw); text-align: center;
+  }
+  #gmodal svg { width: 100%; height: 300px; }
+  #gmodal svg path.outline { fill: var(--fg); }
+  #gmodal .meta { color: var(--dim); font-size: 12px; margin-top: 10px; font-variant-numeric: tabular-nums; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <h1>Waterloo Grotesk</h1>
+  <div class="sub">lab — Inter, inkbled for Design Waterloo</div>
+
+  <div class="group">
+    <label class="head">Family</label>
+    <div class="seg" id="familySeg">
+      <button data-v="Waterloo Grotesk" class="on">Text</button>
+      <button data-v="Waterloo Grotesk Display">Display</button>
+      <button data-v="__inter__">Inter (stock)</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="head">Style</label>
+    <div class="seg" id="styleSeg">
+      <button data-v="normal" class="on">Roman</button>
+      <button data-v="italic">Italic</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="head">Weight</label>
+    <div class="seg" id="weightSeg"></div>
+  </div>
+
+  <div class="group">
+    <label class="head">Dials</label>
+    <div class="slider-row"><label>Size</label>
+      <input type="range" id="size" min="8" max="280" value="96"><output id="sizeOut">96px</output></div>
+    <div class="slider-row"><label>Tracking</label>
+      <input type="range" id="tracking" min="-0.08" max="0.2" step="0.005" value="-0.02"><output id="trackingOut">-0.02em</output></div>
+    <div class="slider-row"><label>Leading</label>
+      <input type="range" id="leading" min="0.8" max="2.2" step="0.05" value="1.05"><output id="leadingOut">1.05</output></div>
+  </div>
+
+  <div class="group checks">
+    <label class="head">OpenType features</label>
+    <label><input type="checkbox" id="f_calt" checked> calt <span class="hint">Waterloo goop + contextual alts</span></label>
+    <label><input type="checkbox" id="f_dlig"> dlig <span class="hint">goop every oo (+ ?! → ‽)</span></label>
+    <label><input type="checkbox" id="f_ss07"> ss07 <span class="hint">restore round punctuation</span></label>
+    <label><input type="checkbox" id="f_ss02"> ss02 <span class="hint">disambiguation (off = swiss)</span></label>
+    <label><input type="checkbox" id="f_tnum"> tnum <span class="hint">tabular numbers</span></label>
+    <label><input type="checkbox" id="f_zero"> zero <span class="hint">slashed zero</span></label>
+    <label><input type="checkbox" id="f_case"> case <span class="hint">cap punctuation</span></label>
+    <label><input type="checkbox" id="f_frac"> frac <span class="hint">fractions</span></label>
+    <label><input type="checkbox" id="f_cv11"> cv11 <span class="hint">single-storey a</span></label>
+  </div>
+
+  <div class="group">
+    <label class="head">Samples</label>
+    <div id="samples"></div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="topbar">
+    <div class="seg mode">
+      <button data-mode="type" class="on">Type</button>
+      <button data-mode="waterfall">Waterfall</button>
+      <button data-mode="grid">Glyphs (debug)</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="seg"><button id="invert">Invert</button></div>
+  </div>
+
+  <div id="stage">
+    <div id="preview" contenteditable="true" spellcheck="false">Waterloo Grotesk</div>
+
+    <div id="waterfall" class="hidden"></div>
+
+    <div id="griddiv" class="hidden">
+      <div id="gridbar">
+        <input type="search" id="gridsearch" placeholder="filter: name, char, or U+0000">
+        <div class="slider-row" style="width:210px"><label style="width:50px">Cell</label>
+          <input type="range" id="cellsize" min="40" max="180" value="72"></div>
+        <div id="gridstats"></div>
+      </div>
+      <div id="glyphgrid"></div>
+    </div>
+  </div>
+</div>
+
+<div id="gmodal"><div class="card" id="gmodalcard"></div></div>
+
+<script>
+const WEIGHTS = [
+  [100, "Thin"], [200, "ExtraLight"], [300, "Light"], [400, "Regular"],
+  [500, "Medium"], [600, "SemiBold"], [700, "Bold"], [800, "ExtraBold"], [900, "Black"]
+];
+const SAMPLES = {
+  "Waterloo": "Waterloo Grotesk",
+  "goop": "Design Waterloo — the oo in Waterloo goops into infinity. Books look good; loops stay loops.",
+  "pangram": "Sphinx of black quartz, judge my vow. 0123456789 ?!",
+  "swiss": "Grotesk 47\nZürich–Waterloo\n«Typografie»",
+  "paragraph": "Design Waterloo is a student-run community at the University of Waterloo. We fork Inter, add ink, round the corners, square the dots, and ship it. Punctuation: period. comma, colon: semicolon; exclaim! question? \"quotes\" (parens) [brackets] {braces}.",
+  "numbers": "0123456789 ½ ¼ ¾ 1/2 3/4 $1,024.50 €47 £900 №47 100% ∞",
+  "interrobang": "you did what?! wait, seriously?!"
+};
+
+// register fonts
+const styleEl = document.createElement("style");
+let css = "";
+for (const [w, name] of WEIGHTS) {
+  for (const [fam, prefix] of [["Waterloo Grotesk", "WaterlooGrotesk"], ["Waterloo Grotesk Display", "WaterlooGroteskDisplay"]]) {
+    const styleName = name === "Regular" ? "" : name;
+    css += `@font-face{font-family:"${fam}";font-weight:${w};font-style:normal;src:url("fonts/${prefix}-${name}.woff2") format("woff2");}\n`;
+    const iname = name === "Regular" ? "Italic" : name + "Italic";
+    css += `@font-face{font-family:"${fam}";font-weight:${w};font-style:italic;src:url("fonts/${prefix}-${iname}.woff2") format("woff2");}\n`;
+  }
+}
+css += `@font-face{font-family:"Inter Stock";font-weight:100 900;font-style:normal;src:url("fonts/InterVariable.woff2") format("woff2");}\n`;
+css += `@font-face{font-family:"Inter Stock";font-weight:100 900;font-style:italic;src:url("fonts/InterVariable-Italic.woff2") format("woff2");}\n`;
+styleEl.textContent = css;
+document.head.appendChild(styleEl);
+
+const state = {
+  family: "Waterloo Grotesk",
+  style: "normal",
+  weight: 600,
+  size: 96,
+  tracking: -0.02,
+  leading: 1.05,
+  mode: "type",
+  gridWeight: "Regular",
+};
+
+const $ = (s) => document.querySelector(s);
+const preview = $("#preview");
+
+// weight buttons
+const weightSeg = $("#weightSeg");
+for (const [w, name] of WEIGHTS) {
+  const b = document.createElement("button");
+  b.textContent = w;
+  b.title = name;
+  b.dataset.v = w;
+  if (w === state.weight) b.classList.add("on");
+  weightSeg.appendChild(b);
+}
+
+// sample buttons
+for (const key of Object.keys(SAMPLES)) {
+  const b = document.createElement("button");
+  b.textContent = key;
+  b.onclick = () => { preview.textContent = SAMPLES[key]; renderWaterfall(); };
+  $("#samples").appendChild(b);
+}
+
+function segWire(el, key, cb) {
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    el.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    state[key] = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v;
+    (cb || apply)();
+  });
+}
+segWire($("#familySeg"), "family");
+segWire($("#styleSeg"), "style");
+segWire($("#weightSeg"), "weight");
+
+function features() {
+  const f = [];
+  const flag = (id, tag) => f.push(`"${tag}" ${$(id).checked ? 1 : 0}`);
+  flag("#f_calt", "calt");
+  flag("#f_dlig", "dlig");
+  flag("#f_ss07", "ss07");
+  flag("#f_ss02", "ss02");
+  flag("#f_tnum", "tnum");
+  flag("#f_zero", "zero");
+  flag("#f_case", "case");
+  flag("#f_frac", "frac");
+  flag("#f_cv11", "cv11");
+  return f.join(", ");
+}
+
+function fontFamily() {
+  return state.family === "__inter__" ? "Inter Stock" : state.family;
+}
+
+function apply() {
+  const ff = features();
+  preview.style.fontFamily = `"${fontFamily()}", sans-serif`;
+  preview.style.fontWeight = state.weight;
+  preview.style.fontStyle = state.style;
+  preview.style.fontSize = state.size + "px";
+  preview.style.letterSpacing = state.tracking + "em";
+  preview.style.lineHeight = state.leading;
+  preview.style.fontFeatureSettings = ff;
+  renderWaterfall();
+}
+
+for (const [id, key, fmt] of [
+  ["#size", "size", (v) => v + "px"],
+  ["#tracking", "tracking", (v) => v + "em"],
+  ["#leading", "leading", (v) => v],
+]) {
+  $(id).addEventListener("input", (e) => {
+    state[key] = +e.target.value;
+    $(id + "Out").textContent = fmt(e.target.value);
+    apply();
+  });
+}
+document.querySelectorAll(".checks input").forEach((c) => c.addEventListener("change", apply));
+
+$("#invert").onclick = () => document.body.classList.toggle("light");
+
+// modes
+document.querySelector("#topbar .mode").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  document.querySelectorAll("#topbar .mode button").forEach((x) => x.classList.remove("on"));
+  b.classList.add("on");
+  state.mode = b.dataset.mode;
+  $("#preview").classList.toggle("hidden", state.mode !== "type");
+  $("#waterfall").classList.toggle("hidden", state.mode !== "waterfall");
+  $("#griddiv").classList.toggle("hidden", state.mode !== "grid");
+  if (state.mode === "waterfall") renderWaterfall();
+  if (state.mode === "grid") loadGrid();
+});
+
+function renderWaterfall() {
+  if (state.mode !== "waterfall") return;
+  const wf = $("#waterfall");
+  wf.innerHTML = "";
+  const text = preview.textContent || "Waterloo Grotesk";
+  for (const [w, name] of WEIGHTS) {
+    const tag = document.createElement("span");
+    tag.className = "waterfall-tag";
+    tag.textContent = w + " · " + name;
+    const row = document.createElement("div");
+    row.className = "waterfall-row";
+    row.textContent = text;
+    row.style.cssText = `
+      font-family:"${fontFamily()}",sans-serif; font-weight:${w};
+      font-style:${state.style}; font-size:${Math.min(state.size, 72)}px;
+      letter-spacing:${state.tracking}em; line-height:${state.leading};
+      font-feature-settings:${features()};`;
+    wf.appendChild(tag);
+    wf.appendChild(row);
+  }
+}
+
+// ---- glyph grid (debug) ----
+let gridData = null;
+let gridWeightName = null;
+
+async function loadGrid() {
+  // grid follows the selected weight
+  const wname = (WEIGHTS.find(([w]) => w === state.weight) || [400, "Regular"])[1];
+  if (gridWeightName !== wname) {
+    const res = await fetch(`data/glyphs-${wname}.json`);
+    gridData = await res.json();
+    gridWeightName = wname;
+  }
+  renderGrid();
+}
+
+function glyphSVG(g, data, big) {
+  const upm = data.upm;
+  const h = data.ascender - data.descender;
+  const vb = `${-upm * 0.05} ${-data.ascender} ${Math.max(g.a, 10) * 1.1 + upm * 0.05} ${h}`;
+  return `<svg viewBox="${vb}" preserveAspectRatio="xMidYMid meet">
+    <g transform="scale(1,-1)"><path class="outline" d="${g.d}"/></g></svg>`;
+}
+
+function renderGrid() {
+  if (!gridData) return;
+  const q = $("#gridsearch").value.trim().toLowerCase();
+  const grid = $("#glyphgrid");
+  grid.innerHTML = "";
+  let shown = 0;
+  const frag = document.createDocumentFragment();
+  for (const g of gridData.glyphs) {
+    if (q) {
+      const hexu = g.u != null ? "u+" + g.u.toString(16).padStart(4, "0") : "";
+      const ch = g.u != null ? String.fromCodePoint(g.u) : "";
+      if (!g.n.toLowerCase().includes(q) && hexu !== q && ch !== q) continue;
+    }
+    const cell = document.createElement("div");
+    cell.className = "gcell";
+    cell.innerHTML = glyphSVG(g, gridData) + `<div class="gname">${g.n}</div>`;
+    cell.onclick = () => openModal(g);
+    frag.appendChild(cell);
+    shown++;
+  }
+  grid.appendChild(frag);
+  $("#gridstats").textContent =
+    `${shown} / ${gridData.glyphs.length} glyphs · ${gridWeightName} · square-punct default, goop at o_o.dlig`;
+}
+$("#gridsearch").addEventListener("input", renderGrid);
+$("#cellsize").addEventListener("input", (e) => {
+  $("#glyphgrid").style.setProperty("--cell", e.target.value + "px");
+});
+
+function openModal(g) {
+  const card = $("#gmodalcard");
+  const uni = g.u != null
+    ? "U+" + g.u.toString(16).toUpperCase().padStart(4, "0") + " · " + String.fromCodePoint(g.u)
+    : "unencoded";
+  card.innerHTML = glyphSVG(g, gridData, true) +
+    `<div style="font-size:16px;font-weight:600;margin-top:8px">${g.n}</div>
+     <div class="meta">${uni} · advance ${g.a} · ${gridWeightName} · UPM ${gridData.upm}</div>`;
+  $("#gmodal").classList.add("open");
+}
+$("#gmodal").onclick = () => $("#gmodal").classList.remove("open");
+
+apply();
+</script>
+</body>
+</html>

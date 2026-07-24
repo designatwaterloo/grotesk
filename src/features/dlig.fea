@@ -80,3 +80,8 @@ sub exclam question by interrobang;
 sub question exclam by interrobang;
 sub exclamdown questiondown by invertedinterrobang;
 sub questiondown exclamdown by invertedinterrobang;
+
+# Waterloo goop: any "oo" melts into the infinity pair when
+# discretionary ligatures are enabled. See also calt.fea, which
+# applies this automatically inside the word "Waterloo" only.
+sub o o by o_o.dlig;

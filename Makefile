@@ -38,10 +38,11 @@ $(UFODIR)/features:
 $(UFODIR)/%.var.designspace: $(UFODIR)/%.designspace misc/tools/gen-var-designspace.py | venv
 	python misc/tools/gen-var-designspace.py $< $@
 
-$(UFODIR)/%.designspace: $(UFODIR)/%.glyphs $(UFODIR)/features misc/tools/postprocess-designspace.py | venv
+$(UFODIR)/%.designspace: $(UFODIR)/%.glyphs $(UFODIR)/features misc/tools/postprocess-designspace.py misc/tools/waterloo-transform.py | venv
 	fontmake $(FM_ARGS) -o ufo -g $< --designspace-path $@ \
 		  --master-dir $(UFODIR) --instance-dir $(UFODIR)
 	python misc/tools/postprocess-designspace.py $@
+	python misc/tools/waterloo-transform.py $@
 
 # instance UFOs from designspace
 $(UFODIR)/Inter%Italic.ufo: $(UFODIR)/Inter-Italic.designspace misc/tools/gen-instance-ufo.sh | venv
@@ -235,6 +236,20 @@ $(UFODIR):
 var: \
 	$(FONTDIR)/var/InterVariable.ttf \
 	$(FONTDIR)/var/InterVariable-Italic.ttf
+
+# ---------------------------------------------------------------------------------
+# Waterloo Grotesk: inkbled statics + lab data
+# (see misc/tools/waterloo-*.py; source transform runs in the designspace rule)
+
+waterloo: var
+	python misc/tools/waterloo-statics.py \
+		$(FONTDIR)/var/InterVariable.ttf \
+		$(FONTDIR)/var/InterVariable-Italic.ttf \
+		-o $(FONTDIR)/waterloo
+	python misc/tools/waterloo-labdata.py
+	python misc/tools/waterloo-test.py
+
+.PHONY: waterloo
 
 googlefonts: var
 	gftools fix-family $(FONTDIR)/var/*.ttf \

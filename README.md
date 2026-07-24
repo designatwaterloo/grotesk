@@ -1,3 +1,32 @@
+# Waterloo Grotesk
+
+**Waterloo Grotesk** is [Design Waterloo](https://designwaterloo.com)'s fork of
+[Inter](https://github.com/rsms/inter) with the wordmark's inkbleed treatment
+baked into the fonts, so nobody has to reconstruct it with Figma strokes again:
+
+- **Inkbleed**: every weight is built from a *lighter* Inter skeleton bulked
+  back up with a round-capped, round-joined stroke (e.g. Bold = Regular
+  skeleton + stroke). Corners round off, joins goop, counters tighten, but
+  apparent stem weight matches the weight name. All 9 weights × text/display
+  × roman/italic are kept.
+- **Square punctuation by default**: Inter's `ss07` square dots are the
+  defaults; enabling `ss07` now *restores* the round originals.
+- **The goop pair**: the "oo" in "Waterloo" melts into an infinity pair
+  automatically (`calt`, scoped to the word only — book/loop/good are safe).
+  Turn on discretionary ligatures (`dlig`) to goop any "oo" on purpose.
+- `ss04` "disambiguation" stays available but is never on by default.
+  Doesn't look swiss enough.
+
+Build with `gmake waterloo` (outputs in `build/fonts/waterloo/`), then open
+`lab/index.html` (serve the repo root) for the type tester with all the dials
+and a debug view of every glyph. Pipeline lives in `misc/tools/waterloo-*.py`;
+the source transform is applied at the UFO stage so upstream Inter merges stay
+trivial.
+
+Everything below is upstream Inter's README.
+
+---
+
 # Inter
 
 Inter is a typeface carefully crafted & designed for computer screens.
