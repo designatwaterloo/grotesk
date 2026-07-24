@@ -25,9 +25,9 @@ from fontTools.designspaceLib import DesignSpaceDocument
 # the two o's keep their exact normal advance -- tracking is untouched --
 # and a smooth ink neck joins the facing bulges at the waist.
 GOOP_NAME = "o_o.dlig"
-GOOP_ATTACH_FRAC = 0.85  # attachment height as fraction of ink height at flange x
+GOOP_ATTACH = 0.72       # attachment height as fraction of o half-height
 GOOP_NECK_RING = 1.2     # waist half-height = this * ring thickness ...
-GOOP_NECK_MAX = 0.6      # ... clamped to this fraction of the o half-height
+GOOP_NECK_MAX = 0.55     # ... clamped to this fraction of the o half-height
 
 
 def glyph_geometry(g):
@@ -154,6 +154,32 @@ def _outer_winding_sign(o):
   return 1 if _shoelace(outer) >= 0 else -1
 
 
+def _outer_polyline(o):
+  polys = [_flatten_contour(c, steps=48) for c in o]
+  return max(polys, key=lambda p: abs(_shoelace(p)))
+
+
+def _flank_point(poly, y, flank):
+  """Point where the outline crosses height y on the given flank, plus the
+  local outline direction there. Returns (x, (dx, dy)) or None."""
+  best = None
+  n = len(poly)
+  for i in range(n):
+    (x0, y0), (x1, y1) = poly[i], poly[(i + 1) % n]
+    if (y0 <= y < y1) or (y1 <= y < y0):
+      t = (y - y0) / (y1 - y0)
+      x = x0 + t * (x1 - x0)
+      if (best is None or (flank == "right" and x > best[0])
+          or (flank == "left" and x < best[0])):
+        best = (x, (x1 - x0, y1 - y0))
+  return best
+
+
+def _unit(v):
+  d = math.hypot(v[0], v[1])
+  return (v[0] / d, v[1] / d) if d > 1e-9 else (0.0, 0.0)
+
+
 def _shoelace(poly):
   area = 0.0
   n = len(poly)
@@ -174,48 +200,71 @@ def add_goop_ligature(ufo):
   o = ufo["o"]
   xmin, xmax, ymin, ymax, t = measure_o(ufo)
   dx = o.width
-  cx = (xmin + xmax) / 2.0
   cy = (ymin + ymax) / 2.0
-  a_out = (xmax - xmin) / 2.0
   b_out = (ymax - ymin) / 2.0
   h = min(GOOP_NECK_RING * t, GOOP_NECK_MAX * b_out)  # waist half-height
-  # flange x: mid ring wall, but always beyond the counter so the bridge's
-  # side edges never cross into it (counter max half-width = a_out - t)
-  fx = max(a_out - 0.5 * t, a_out - t + 6.0)
-  xl = cx + fx          # flange x on left o (facing right)
-  xr = dx + cx - fx     # flange x on right o (facing left)
-  # ink height at flange x (outer ellipse), attachment inside it
-  y_outer = b_out * math.sqrt(max(0.0, 1.0 - (fx / a_out) ** 2))
-  y_att = max(GOOP_ATTACH_FRAC * y_outer, min(h * 1.15, 0.95 * y_outer))
-  # cubic through midpoint at waist: yc = (8h - 2*y_att)/6
-  yc = (8.0 * h - 2.0 * y_att) / 6.0
-  cxl = xl + 0.45 * (xr - xl)
-  cxr = xr - 0.45 * (xr - xl)
-  # counter-clockwise construction (positive shoelace), starting top-left
-  bridge_ccw = [
-    (xl, cy + y_att, "line", False),
-    (cxl, cy + yc, None, False),
-    (cxr, cy + yc, None, False),
-    (xr, cy + y_att, "curve", False),
-    (xr, cy - y_att, "line", False),
-    (cxr, cy - yc, None, False),
-    (cxl, cy - yc, None, False),
-    (xl, cy - y_att, "curve", False),
+  y_att = max(GOOP_ATTACH * b_out, min(1.4 * h, 0.9 * b_out))
+  h = min(h, 0.75 * y_att)
+  poly = _outer_polyline(o)
+
+  def saddle(y_sign):
+    """One saddle curve (top: y_sign=+1, bottom: -1), tangent to both o's.
+    Returns [P_left, C1, C2, P_right] as (x, y) pairs."""
+    y = cy + y_sign * y_att
+    fl = _flank_point(poly, y, "right")          # left o, facing right
+    fr = _flank_point(poly, y, "left")           # right o, facing left
+    xl, vl = fl[0], _unit(fl[1])
+    xr, vr = dx + fr[0], _unit(fr[1])
+    # orient tangents: leave P_left heading toward the waist (dy opposing
+    # y_sign), arrive at P_right heading away from the waist
+    if vl[1] * y_sign > 0:
+      vl = (-vl[0], -vl[1])
+    if vl[0] < 0:  # must head into the gap (rightward)
+      vl = (-vl[0], -vl[1])
+    if vr[1] * y_sign < 0:
+      vr = (-vr[0], -vr[1])
+    if vr[0] < 0:
+      vr = (-vr[0], -vr[1])
+    tyl, tyr = abs(vl[1]), abs(vr[1])
+    span = xr - xl
+    # handle length s so the cubic's midpoint sags exactly to the waist h
+    denom = 3.0 * (tyl + tyr)
+    s = (y_att - h) * 8.0 / denom if denom > 1e-6 else span * 0.4
+    for tx in (abs(vl[0]), abs(vr[0])):
+      if tx > 1e-6:
+        s = min(s, 0.46 * span / tx)
+    c1 = (xl + s * vl[0], y - y_sign * s * tyl)
+    c2 = (xr - s * vr[0], y - y_sign * s * tyr)
+    return [(xl, y), c1, c2, (xr, y)]
+
+  top = saddle(+1)
+  bot = saddle(-1)
+  # contour: TL ~cubic~ TR, chord down right flank, BR ~cubic~ BL, chord up
+  bridge = [
+    (top[0][0], top[0][1], "line", True),
+    (top[1][0], top[1][1], None, False),
+    (top[2][0], top[2][1], None, False),
+    (top[3][0], top[3][1], "curve", True),
+    (bot[3][0], bot[3][1], "line", True),
+    (bot[2][0], bot[2][1], None, False),
+    (bot[1][0], bot[1][1], None, False),
+    (bot[0][0], bot[0][1], "curve", True),
   ]
   # the bridge must wind the SAME way as the o's outer contour, or the
-  # overlap cancels under nonzero fill; flip construction if needed
-  bridge_sign = 1 if _shoelace([(p[0], p[1]) for p in bridge_ccw]) >= 0 else -1
+  # overlap cancels under nonzero fill; reverse traversal if needed
+  bridge_sign = 1 if _shoelace([(p[0], p[1]) for p in bridge]) >= 0 else -1
   if bridge_sign != _outer_winding_sign(o):
-    bridge_ccw = [
-      (xl, cy - y_att, "line", False),
-      (cxl, cy - yc, None, False),
-      (cxr, cy - yc, None, False),
-      (xr, cy - y_att, "curve", False),
-      (xr, cy + y_att, "line", False),
-      (cxr, cy + yc, None, False),
-      (cxl, cy + yc, None, False),
-      (xl, cy + y_att, "curve", False),
+    bridge = [
+      (bot[0][0], bot[0][1], "line", True),
+      (bot[1][0], bot[1][1], None, False),
+      (bot[2][0], bot[2][1], None, False),
+      (bot[3][0], bot[3][1], "curve", True),
+      (top[3][0], top[3][1], "line", True),
+      (top[2][0], top[2][1], None, False),
+      (top[1][0], top[1][1], None, False),
+      (top[0][0], top[0][1], "curve", True),
     ]
+  bridge_ccw = bridge
   g = ufo.newGlyph(GOOP_NAME)
   g.width = 2 * o.width
   pen = g.getPointPen()

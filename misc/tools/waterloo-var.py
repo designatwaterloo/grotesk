@@ -145,97 +145,91 @@ def contour_sign(pts):
   return area / 2.0
 
 
-def corner_indices(pts):
-  """Anchor indices whose tangents turn sharply (non-smooth corners)."""
-  out = []
-  cos_thresh = math.cos(math.radians(180.0 - CORNER_SMOOTH_DEG))
+def classify_corners(pts, ink_side):
+  """Per-anchor classification, computed ONCE on the default master and
+  replayed on every master so structures stay identical:
+    "s"  smooth continuation (offset along bisector, tiny miter)
+    "a"  arc join: offset edges diverge -> round the corner (the inkbleed)
+    "m"  miter join: offset edges converge -> exact intersection point,
+         which lands inside the ink (T underarms, counter tips)"""
+  cls = {}
   for i in _anchors(pts):
-    if pts[i][3]:  # marked smooth
-      continue
     t_in, t_out = _tangents(pts, i)
     if t_in == (0.0, 0.0) or t_out == (0.0, 0.0):
+      cls[i] = "s"
       continue
     dot = t_in[0] * t_out[0] + t_in[1] * t_out[1]
-    if dot < math.cos(math.radians(180.0 - CORNER_SMOOTH_DEG)) or dot < 0.98:
-      # any turn of more than ~12 degrees counts as a corner
-      out.append(i)
-  return out
+    if dot > 0.98:  # under ~12 degrees of turn
+      cls[i] = "s"
+      continue
+    cross = t_in[0] * t_out[1] - t_in[1] * t_out[0]
+    cls[i] = "a" if cross * ink_side < 0 else "m"
+  return cls
 
 
-def offset_contour(pts, radius, ink_side):
-  """Offset all points away from the ink. The SAME left/right rule applies
-  to every contour: because holes are wound opposite to outers, a uniform
-  rule grows outers and shrinks holes automatically. ink_side (+1 left of
-  travel / -1 right of travel) is calibrated once per font from the 'o'."""
+def bleed_contour(pts, radius, side, cls):
+  """Round-join outward offset: the stroking model, applied symbolically so
+  every master emits the identical point structure."""
   n = len(pts)
-  # normal per anchor via bisector; offcurves inherit neighbouring anchor's
-  # displacement (first offcurve after an anchor -> that anchor; last before
-  # the next anchor -> next anchor; middle handled by nearest).
-  side = ink_side
-  disp = [None] * n
-  for i in _anchors(pts):
-    t_in, t_out = _tangents(pts, i)
-    bx, by = t_in[0] + t_out[0], t_in[1] + t_out[1]
-    bl = math.hypot(bx, by)
-    if bl < 1e-6:  # 180-degree spike; fall back to incoming normal
-      nx, ny = -t_in[1], t_in[0]
-      k = 1.0
-    else:
-      bx, by = bx / bl, by / bl
-      nx, ny = -by, bx
-      # miter factor 1/cos(theta/2), capped at 1.6 (90-degree corners need
-      # 1.414; anything spikier gets filleted anyway and a tighter cap
-      # avoids self-intersecting offsets at reflex corners)
-      cos_half = math.sqrt(max(0.0, (1 + (t_in[0]*t_out[0] + t_in[1]*t_out[1])) / 2))
-      k = 1.0 / max(cos_half, 0.625)
-    disp[i] = (side * nx * radius * k, side * ny * radius * k)
   anchors = _anchors(pts)
+
+  def NRM(t):
+    return (side * -t[1], side * t[0])
+
+  info = {}
+  for i in anchors:
+    t_in, t_out = _tangents(pts, i)
+    info[i] = (t_in, t_out, NRM(t_in), NRM(t_out))
+
+  def bisector(nin, nout):
+    bx, by = nin[0] + nout[0], nin[1] + nout[1]
+    bl = math.hypot(bx, by)
+    if bl < 1e-6:
+      return nin, 1.0
+    cos_half = math.sqrt(max(0.0, (1 + (nin[0]*nout[0] + nin[1]*nout[1])) / 2))
+    return (bx / bl, by / bl), cos_half
+
+  def emit_anchor(i):
+    p = pts[i]
+    t_in, t_out, nin, nout = info[i]
+    kind = cls.get(i, "s")
+    if kind == "a":
+      ax, ay = p[0] + nin[0] * radius, p[1] + nin[1] * radius
+      bx, by = p[0] + nout[0] * radius, p[1] + nout[1] * radius
+      dot = max(-1.0, min(1.0, t_in[0]*t_out[0] + t_in[1]*t_out[1]))
+      phi = math.acos(dot)
+      hl = (4.0 / 3.0) * math.tan(phi / 4.0) * radius
+      return [
+        (ax, ay, p[2], True),
+        (ax + t_in[0] * hl, ay + t_in[1] * hl, None, False),
+        (bx - t_out[0] * hl, by - t_out[1] * hl, None, False),
+        (bx, by, "curve", True),
+      ]
+    b, cos_half = bisector(nin, nout)
+    if kind == "m":
+      k = min(1.0 / max(cos_half, 0.25), 4.0)
+    else:
+      k = 1.0 / max(cos_half, 0.87)
+    return [(p[0] + b[0] * radius * k, p[1] + b[1] * radius * k, p[2], p[3])]
+
+  out = []
   for ai, i in enumerate(anchors):
+    out.extend(emit_anchor(i))
     nxt = anchors[(ai + 1) % len(anchors)]
-    # offcurves strictly between i and nxt
+    # offcurves between i and nxt: first half ride i's outgoing normal,
+    # second half ride nxt's incoming normal
     j = (i + 1) % n
     betw = []
     while j != nxt:
       if pts[j][2] is None:
         betw.append(j)
       j = (j + 1) % n
+    nout_i = info[i][3]
+    nin_x = info[nxt][2]
     for bi, j in enumerate(betw):
-      src = i if bi < (len(betw) + 1) // 2 else nxt
-      disp[j] = disp[src]
-  out = []
-  for p, d in zip(pts, disp):
-    dx, dy = d if d else (0.0, 0.0)
-    out.append((p[0] + dx, p[1] + dy, p[2], p[3]))
-  return out
-
-
-def fillet_corners(pts, corners, radius):
-  """Replace each corner anchor with A + cubic(B): identical structure for
-  identical `corners` lists, regardless of geometry."""
-  if not corners:
-    return pts
-  n = len(pts)
-  cset = set(corners)
-  out = []
-  for i, p in enumerate(pts):
-    if i not in cset:
-      out.append(p)
-      continue
-    t_in, t_out = _tangents(pts, i)
-    # distance to previous/next point limits the cut
-    pin = pts[(i - 1) % n]
-    pout = pts[(i + 1) % n]
-    lin = math.hypot(p[0] - pin[0], p[1] - pin[1])
-    lout = math.hypot(pout[0] - p[0], pout[1] - p[1])
-    d = min(radius, lin * 0.45, lout * 0.45)
-    ax, ay = p[0] - t_in[0] * d, p[1] - t_in[1] * d
-    bx, by = p[0] + t_out[0] * d, p[1] + t_out[1] * d
-    c1 = (ax + t_in[0] * d * KAPPA, ay + t_in[1] * d * KAPPA, None, False)
-    c2 = (bx - t_out[0] * d * KAPPA, by - t_out[1] * d * KAPPA, None, False)
-    out.append((ax, ay, p[2], True))
-    out.append(c1)
-    out.append(c2)
-    out.append((bx, by, "curve", True))
+      nrm = nout_i if bi < (len(betw) + 1) // 2 else nin_x
+      p = pts[j]
+      out.append((p[0] + nrm[0] * radius, p[1] + nrm[1] * radius, None, False))
   return out
 
 
@@ -264,7 +258,7 @@ def ink_side_for_font(ufo):
   cts = glyph_points(o)
   outer = max(cts, key=lambda c: abs(contour_sign(c)))
   # try left side (+1): offset and see if |area| grows
-  test = offset_contour(outer, 10.0, +1)
+  test = bleed_contour(outer, 10.0, +1, {})
   return +1 if abs(contour_sign(test)) > abs(contour_sign(outer)) else -1
 
 
@@ -278,28 +272,31 @@ def bleed_ufo(ufo, radius, decisions, ink_side):
     if name not in decisions or not glyph.contours:
       continue
     contours = glyph_points(glyph)
-    corner_lists = decisions[name]
-    if len(corner_lists) != len(contours):
+    cls_lists = decisions[name]
+    if len(cls_lists) != len(contours):
       continue  # structure mismatch; skip defensively
     newc = []
-    for cpts, corners in zip(contours, corner_lists):
-      c1 = offset_contour(cpts, radius, ink_side)
-      c2 = fillet_corners(c1, corners, radius)
-      newc.append(c2)
+    for cpts, cls in zip(contours, cls_lists):
+      newc.append(bleed_contour(cpts, radius, ink_side, cls))
     set_glyph_points(glyph, newc)
     count += 1
   return count
 
 
-def compute_decisions(ufo):
-  """Corner decisions from the default master; also records which glyphs
-  have contours at all."""
+def compute_decisions(ufo, ink_side):
+  """Corner classifications from the default master; also records which
+  glyphs have contours at all."""
   decisions = {}
   for glyph in ufo:
     if not glyph.contours:
       continue
     contours = glyph_points(glyph)
-    decisions[glyph.name] = [corner_indices(c) for c in contours]
+    cls = [classify_corners(c, ink_side) for c in contours]
+    if glyph.name == "o_o.dlig":
+      # the goop bridge meets the o's tangentially; its junction anchors are
+      # buried in ink at union time -- plain smooth offsets, no joins
+      cls = [{i: "s" for i in d} for d in cls]
+    decisions[glyph.name] = cls
   return decisions
 
 
@@ -372,8 +369,8 @@ def main(argv):
   # 2. bleed
   default_path = next(p for (p, w, o, r) in masters if w == 400 and o == 14)
   default_ufo = ufoLib2.Font.open(default_path)
-  decisions = compute_decisions(default_ufo)
   ink_side = ink_side_for_font(default_ufo)
+  decisions = compute_decisions(default_ufo, ink_side)
   print("ink side: %+d; %d contour glyphs" % (ink_side, len(decisions)))
   sig_ref = None
   for (path, wval, opsz, r) in masters:
