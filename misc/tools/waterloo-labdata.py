@@ -62,6 +62,10 @@ def main():
     shutil.copy(f, os.path.join(LAB, "fonts", os.path.basename(f)))
   print("copied %d woff2 files" % len(glob.glob(os.path.join(LAB, "fonts", "*.woff2"))))
 
+  # Waterloo variable fonts (phase 2), if built
+  for f in glob.glob(os.path.join(VARDIR, "WaterlooGroteskVariable*.woff2")):
+    shutil.copy(f, os.path.join(LAB, "fonts", os.path.basename(f)))
+
   # stock InterVariable for compare mode
   for name in ("InterVariable.ttf", "InterVariable-Italic.ttf"):
     src = os.path.join(VARDIR, name)

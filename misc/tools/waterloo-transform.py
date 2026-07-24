@@ -17,15 +17,17 @@ Runs on the master UFOs of a designspace, after postprocess-designspace.py:
 Kept at the UFO stage (not in the .glyphspackage sources) so that upstream
 Inter merges stay trivial.
 """
-import sys, argparse
+import sys, argparse, math
 import defcon
 from fontTools.designspaceLib import DesignSpaceDocument
 
-# how far (in multiples of the o ring thickness) the two o's of the goop
-# ligature overlap. Higher = goopier.
-GOOP_OVERLAP_FACTOR = 1.75
-
+# Goop geometry (matched to the Design Waterloo wordmark SVG):
+# the two o's keep their exact normal advance -- tracking is untouched --
+# and a smooth ink neck joins the facing bulges at the waist.
 GOOP_NAME = "o_o.dlig"
+GOOP_ATTACH_FRAC = 0.85  # attachment height as fraction of ink height at flange x
+GOOP_NECK_RING = 1.2     # waist half-height = this * ring thickness ...
+GOOP_NECK_MAX = 0.6      # ... clamped to this fraction of the o half-height
 
 
 def glyph_geometry(g):
@@ -119,7 +121,7 @@ def _flatten_contour(contour, steps=24):
 
 
 def measure_o(ufo):
-  """Returns (xMin, xMax, ring_thickness) of the 'o' glyph at mid-height."""
+  """Returns (xMin, xMax, yMin, yMax, ring_thickness) of the 'o' glyph."""
   o = ufo["o"]
   polylines = [_flatten_contour(c) for c in o]
   all_pts = [p for poly in polylines for p in poly]
@@ -143,27 +145,91 @@ def measure_o(ufo):
     thickness = crossings[1] - crossings[0]  # left ring wall
   else:
     thickness = (xmax - xmin) * 0.18  # fallback guess
-  return xmin, xmax, thickness
+  return xmin, xmax, ymin, ymax, thickness
+
+
+def _outer_winding_sign(o):
+  polylines = [_flatten_contour(c) for c in o]
+  outer = max(polylines, key=lambda poly: abs(_shoelace(poly)))
+  return 1 if _shoelace(outer) >= 0 else -1
+
+
+def _shoelace(poly):
+  area = 0.0
+  n = len(poly)
+  for i in range(n):
+    x0, y0 = poly[i]
+    x1, y1 = poly[(i + 1) % n]
+    area += x0 * y1 - x1 * y0
+  return area / 2.0
 
 
 def add_goop_ligature(ufo):
+  """o_o.dlig: two o components at the o's EXACT normal advance (tracking is
+  untouched), plus an ink-neck contour joining the facing bulges at the
+  waist -- per the Design Waterloo wordmark. The neck scales with the ring
+  thickness, so it goes wiry at Thin and chunky at Black."""
   if GOOP_NAME in ufo:
     del ufo[GOOP_NAME]
   o = ufo["o"]
-  xmin, xmax, thickness = measure_o(ufo)
-  bbox_w = xmax - xmin
-  dx = round(bbox_w - GOOP_OVERLAP_FACTOR * thickness)
+  xmin, xmax, ymin, ymax, t = measure_o(ufo)
+  dx = o.width
+  cx = (xmin + xmax) / 2.0
+  cy = (ymin + ymax) / 2.0
+  a_out = (xmax - xmin) / 2.0
+  b_out = (ymax - ymin) / 2.0
+  h = min(GOOP_NECK_RING * t, GOOP_NECK_MAX * b_out)  # waist half-height
+  # flange x: mid ring wall, but always beyond the counter so the bridge's
+  # side edges never cross into it (counter max half-width = a_out - t)
+  fx = max(a_out - 0.5 * t, a_out - t + 6.0)
+  xl = cx + fx          # flange x on left o (facing right)
+  xr = dx + cx - fx     # flange x on right o (facing left)
+  # ink height at flange x (outer ellipse), attachment inside it
+  y_outer = b_out * math.sqrt(max(0.0, 1.0 - (fx / a_out) ** 2))
+  y_att = max(GOOP_ATTACH_FRAC * y_outer, min(h * 1.15, 0.95 * y_outer))
+  # cubic through midpoint at waist: yc = (8h - 2*y_att)/6
+  yc = (8.0 * h - 2.0 * y_att) / 6.0
+  cxl = xl + 0.45 * (xr - xl)
+  cxr = xr - 0.45 * (xr - xl)
+  # counter-clockwise construction (positive shoelace), starting top-left
+  bridge_ccw = [
+    (xl, cy + y_att, "line", False),
+    (cxl, cy + yc, None, False),
+    (cxr, cy + yc, None, False),
+    (xr, cy + y_att, "curve", False),
+    (xr, cy - y_att, "line", False),
+    (cxr, cy - yc, None, False),
+    (cxl, cy - yc, None, False),
+    (xl, cy - y_att, "curve", False),
+  ]
+  # the bridge must wind the SAME way as the o's outer contour, or the
+  # overlap cancels under nonzero fill; flip construction if needed
+  bridge_sign = 1 if _shoelace([(p[0], p[1]) for p in bridge_ccw]) >= 0 else -1
+  if bridge_sign != _outer_winding_sign(o):
+    bridge_ccw = [
+      (xl, cy - y_att, "line", False),
+      (cxl, cy - yc, None, False),
+      (cxr, cy - yc, None, False),
+      (xr, cy - y_att, "curve", False),
+      (xr, cy + y_att, "line", False),
+      (cxr, cy + yc, None, False),
+      (cxl, cy + yc, None, False),
+      (xl, cy + y_att, "curve", False),
+    ]
   g = ufo.newGlyph(GOOP_NAME)
-  g.width = o.width + dx
+  g.width = 2 * o.width
   pen = g.getPointPen()
   pen.addComponent("o", (1, 0, 0, 1, 0, 0))
   pen.addComponent("o", (1, 0, 0, 1, dx, 0))
-  # keep o's spacing groups out of it; ligature carries its own metrics
+  pen.beginPath()
+  for (x, y, seg, smooth) in bridge_ccw:
+    pen.addPoint((round(x), round(y)), segmentType=seg, smooth=smooth)
+  pen.endPath()
   order = ufo.lib.get("public.glyphOrder")
   if order is not None and GOOP_NAME not in order:
     order.append(GOOP_NAME)
     ufo.lib["public.glyphOrder"] = order
-  return dx, thickness
+  return dx, t
 
 
 def main(argv):

@@ -137,6 +137,7 @@
     <div class="seg" id="familySeg">
       <button data-v="Waterloo Grotesk" class="on">Text</button>
       <button data-v="Waterloo Grotesk Display">Display</button>
+      <button data-v="__var__">Variable (β)</button>
       <button data-v="__inter__">Inter (stock)</button>
     </div>
   </div>
@@ -162,6 +163,12 @@
       <input type="range" id="tracking" min="-0.08" max="0.2" step="0.005" value="-0.02"><output id="trackingOut">-0.02em</output></div>
     <div class="slider-row"><label>Leading</label>
       <input type="range" id="leading" min="0.8" max="2.2" step="0.05" value="1.05"><output id="leadingOut">1.05</output></div>
+    <div class="slider-row"><label>Weight (free)</label>
+      <input type="range" id="wfree" min="100" max="900" step="1" value="600"><output id="wfreeOut">600</output></div>
+    <div class="slider-row"><label>Optical sz</label>
+      <input type="range" id="opsz" min="14" max="32" step="0.5" value="14" disabled><output id="opszOut">auto</output></div>
+    <label style="font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center;margin-left:74px">
+      <input type="checkbox" id="opszAuto" checked> auto optical size</label>
   </div>
 
   <div class="group checks">
@@ -241,6 +248,8 @@ for (const [w, name] of WEIGHTS) {
 }
 css += `@font-face{font-family:"Inter Stock";font-weight:100 900;font-style:normal;src:url("fonts/InterVariable.woff2") format("woff2");}\n`;
 css += `@font-face{font-family:"Inter Stock";font-weight:100 900;font-style:italic;src:url("fonts/InterVariable-Italic.woff2") format("woff2");}\n`;
+css += `@font-face{font-family:"Waterloo Grotesk Var";font-weight:100 900;font-style:normal;src:url("fonts/WaterlooGroteskVariable.woff2") format("woff2");}\n`;
+css += `@font-face{font-family:"Waterloo Grotesk Var";font-weight:100 900;font-style:italic;src:url("fonts/WaterlooGroteskVariable-Italic.woff2") format("woff2");}\n`;
 styleEl.textContent = css;
 document.head.appendChild(styleEl);
 
@@ -307,7 +316,15 @@ function features() {
 }
 
 function fontFamily() {
-  return state.family === "__inter__" ? "Inter Stock" : state.family;
+  if (state.family === "__inter__") return "Inter Stock";
+  if (state.family === "__var__") return "Waterloo Grotesk Var";
+  return state.family;
+}
+
+function varSettings() {
+  const auto = $("#opszAuto").checked;
+  if (auto) return "normal";
+  return `"opsz" ${$("#opsz").value}`;
 }
 
 function apply() {
@@ -319,6 +336,8 @@ function apply() {
   preview.style.letterSpacing = state.tracking + "em";
   preview.style.lineHeight = state.leading;
   preview.style.fontFeatureSettings = ff;
+  preview.style.fontVariationSettings = varSettings();
+  preview.style.fontOpticalSizing = "auto";
   renderWaterfall();
 }
 
@@ -334,6 +353,30 @@ for (const [id, key, fmt] of [
   });
 }
 document.querySelectorAll(".checks input").forEach((c) => c.addEventListener("change", apply));
+
+// free weight slider <-> weight buttons
+$("#wfree").addEventListener("input", (e) => {
+  state.weight = +e.target.value;
+  $("#wfreeOut").textContent = e.target.value;
+  weightSeg.querySelectorAll("button").forEach((b) =>
+    b.classList.toggle("on", +b.dataset.v === state.weight));
+  apply();
+});
+weightSeg.addEventListener("click", () => {
+  $("#wfree").value = state.weight;
+  $("#wfreeOut").textContent = state.weight;
+});
+
+// optical size dial
+$("#opszAuto").addEventListener("change", (e) => {
+  $("#opsz").disabled = e.target.checked;
+  $("#opszOut").textContent = e.target.checked ? "auto" : $("#opsz").value;
+  apply();
+});
+$("#opsz").addEventListener("input", (e) => {
+  $("#opszOut").textContent = e.target.value;
+  apply();
+});
 
 $("#invert").onclick = () => document.body.classList.toggle("light");
 
@@ -367,7 +410,8 @@ function renderWaterfall() {
       font-family:"${fontFamily()}",sans-serif; font-weight:${w};
       font-style:${state.style}; font-size:${Math.min(state.size, 72)}px;
       letter-spacing:${state.tracking}em; line-height:${state.leading};
-      font-feature-settings:${features()};`;
+      font-feature-settings:${features()};
+      font-variation-settings:${varSettings()};`;
     wf.appendChild(tag);
     wf.appendChild(row);
   }
