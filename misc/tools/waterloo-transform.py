@@ -25,9 +25,11 @@ from fontTools.designspaceLib import DesignSpaceDocument
 # the two o's keep their exact normal advance -- tracking is untouched --
 # and a smooth ink neck joins the facing bulges at the waist.
 GOOP_NAME = "o_o.dlig"
+# The saddle geometry is deliberately WEIGHT-INVARIANT: both heights are
+# fractions of the o's half-height, so the goop reads as the same shape
+# from Thin to Black (only the ring weight changes around it).
 GOOP_ATTACH = 0.72       # attachment height as fraction of o half-height
-GOOP_NECK_RING = 1.2     # waist half-height = this * ring thickness ...
-GOOP_NECK_MAX = 0.55     # ... clamped to this fraction of the o half-height
+GOOP_NECK = 0.55         # waist half-height as fraction of o half-height
 
 
 def glyph_geometry(g):
@@ -202,9 +204,8 @@ def add_goop_ligature(ufo):
   dx = o.width
   cy = (ymin + ymax) / 2.0
   b_out = (ymax - ymin) / 2.0
-  h = min(GOOP_NECK_RING * t, GOOP_NECK_MAX * b_out)  # waist half-height
-  y_att = max(GOOP_ATTACH * b_out, min(1.4 * h, 0.9 * b_out))
-  h = min(h, 0.75 * y_att)
+  h = GOOP_NECK * b_out       # waist half-height
+  y_att = GOOP_ATTACH * b_out  # saddle attachment height
   poly = _outer_polyline(o)
 
   def saddle(y_sign):
