@@ -208,9 +208,13 @@ def add_goop_ligature(ufo):
   poly = _outer_polyline(o)
 
   def saddle(y_sign):
-    """One saddle curve (top: y_sign=+1, bottom: -1), tangent to both o's.
-    Returns [P_left, C1, C2, P_right] as (x, y) pairs."""
+    """One saddle (top: y_sign=+1, bottom: -1): TWO cubics tangent to the
+    o's at the ends and meeting at an explicit waist point with a
+    HORIZONTAL tangent, so the bottom of the dip is genuinely round --
+    never a crease. Returns dicts with left-to-right and right-to-left
+    typed point lists."""
     y = cy + y_sign * y_att
+    yw = cy + y_sign * h
     fl = _flank_point(poly, y, "right")          # left o, facing right
     fr = _flank_point(poly, y, "left")           # right o, facing left
     xl, vl = fl[0], _unit(fl[1])
@@ -225,45 +229,78 @@ def add_goop_ligature(ufo):
       vr = (-vr[0], -vr[1])
     if vr[0] < 0:
       vr = (-vr[0], -vr[1])
-    tyl, tyr = abs(vl[1]), abs(vr[1])
-    span = xr - xl
-    # handle length s so the cubic's midpoint sags exactly to the waist h
-    denom = 3.0 * (tyl + tyr)
-    s = (y_att - h) * 8.0 / denom if denom > 1e-6 else span * 0.4
-    for tx in (abs(vl[0]), abs(vr[0])):
-      if tx > 1e-6:
-        s = min(s, 0.46 * span / tx)
-    c1 = (xl + s * vl[0], y - y_sign * s * tyl)
-    c2 = (xr - s * vr[0], y - y_sign * s * tyr)
-    return [(xl, y), c1, c2, (xr, y)]
+    xc = (xl + xr) / 2.0
+    drop = abs(y - yw)
+    # launch handles: halfway toward the waist along the flank tangent,
+    # never overshooting either dimension
+    def launch(v, dxs):
+      s = 0.5 * min(
+        dxs / max(abs(v[0]), 1e-6),
+        drop / max(abs(v[1]), 1e-6),
+      )
+      return s
+    s_l = launch(vl, xc - xl)
+    s_r = launch(vr, xr - xc)
+    hm_l = 0.45 * (xc - xl)   # horizontal handles at the waist point
+    hm_r = 0.45 * (xr - xc)
+    c1 = (xl + s_l * vl[0], y + s_l * vl[1])
+    c2 = (xc - hm_l, yw)
+    c3 = (xc + hm_r, yw)
+    c4 = (xr - s_r * vr[0], y - s_r * vr[1])
+    lr = [
+      (xl, y, "line", True),
+      (c1[0], c1[1], None, False),
+      (c2[0], c2[1], None, False),
+      (xc, yw, "curve", True),
+      (c3[0], c3[1], None, False),
+      (c4[0], c4[1], None, False),
+      (xr, y, "curve", True),
+    ]
+    rl = [
+      (xr, y, "line", True),
+      (c4[0], c4[1], None, False),
+      (c3[0], c3[1], None, False),
+      (xc, yw, "curve", True),
+      (c2[0], c2[1], None, False),
+      (c1[0], c1[1], None, False),
+      (xl, y, "curve", True),
+    ]
+    return {"lr": lr, "rl": rl}
 
   top = saddle(+1)
   bot = saddle(-1)
-  # contour: TL ~cubic~ TR, chord down right flank, BR ~cubic~ BL, chord up
-  bridge = [
-    (top[0][0], top[0][1], "line", True),
-    (top[1][0], top[1][1], None, False),
-    (top[2][0], top[2][1], None, False),
-    (top[3][0], top[3][1], "curve", True),
-    (bot[3][0], bot[3][1], "line", True),
-    (bot[2][0], bot[2][1], None, False),
-    (bot[1][0], bot[1][1], None, False),
-    (bot[0][0], bot[0][1], "curve", True),
-  ]
+
+  # side edges: a straight chord between the attachment points would cut
+  # across the counter at light ring weights (visible "rectangle"), so the
+  # sides trace the o's actual flank, inset into the ring wall -- always
+  # buried in ink, invisible after union.
+  inset = max(0.4 * t, 10.0)
+  SIDE_FRACS = [0.75, 0.45, 0.0, -0.45, -0.75]
+
+  def flank_samples(flank, descending):
+    pts = []
+    fracs = SIDE_FRACS if descending else [-f for f in SIDE_FRACS]
+    for fr in fracs:
+      y = cy + fr * y_att
+      fp = _flank_point(poly, y, flank)
+      if fp is None:
+        continue
+      if flank == "right":  # left o's facing flank; inset toward its center
+        pts.append((fp[0] - inset, y, "line", False))
+      else:                 # right o's facing flank (shifted by dx)
+        pts.append((dx + fp[0] + inset, y, "line", False))
+    return pts
+
+  right_down = flank_samples("left", descending=True)    # right o, going down
+  left_up = flank_samples("right", descending=False)     # left o, going up
+  bridge = top["lr"] + right_down + bot["rl"] + left_up
   # the bridge must wind the SAME way as the o's outer contour, or the
   # overlap cancels under nonzero fill; reverse traversal if needed
   bridge_sign = 1 if _shoelace([(p[0], p[1]) for p in bridge]) >= 0 else -1
   if bridge_sign != _outer_winding_sign(o):
-    bridge = [
-      (bot[0][0], bot[0][1], "line", True),
-      (bot[1][0], bot[1][1], None, False),
-      (bot[2][0], bot[2][1], None, False),
-      (bot[3][0], bot[3][1], "curve", True),
-      (top[3][0], top[3][1], "line", True),
-      (top[2][0], top[2][1], None, False),
-      (top[1][0], top[1][1], None, False),
-      (top[0][0], top[0][1], "curve", True),
-    ]
+    right_up = flank_samples("left", descending=False)
+    left_down = flank_samples("right", descending=True)
+    bridge = bot["lr"] + right_up + top["rl"] + left_down
   bridge_ccw = bridge
   g = ufo.newGlyph(GOOP_NAME)
   g.width = 2 * o.width
